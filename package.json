@@ -1,0 +1,15 @@
+{
+  "name": "mock-score-api",
+  "version": "1.0.0",
+  "description": "Simple mock API returning a score for Chainlink Functions testing",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}
