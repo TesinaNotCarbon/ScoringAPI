@@ -1,0 +1,47 @@
+from __future__ import annotations
+
+from functools import lru_cache
+from typing import Literal
+
+from pydantic import AnyHttpUrl, Field, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    """Application settings loaded from environment variables."""
+
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+    app_name: str = "Scoring API"
+    app_version: str = "1.0.0"
+    environment: Literal["local", "test", "staging", "production"] = "local"
+    debug: bool = False
+    host: str = "0.0.0.0"
+    port: int = 3000
+
+    cors_origins: list[str] = Field(default_factory=list)
+
+    pinata_gateway_base_url: AnyHttpUrl = "https://gateway.pinata.cloud/ipfs"
+    pinata_jwt: str | None = None
+    ipfs_timeout_seconds: float = 10.0
+    ipfs_max_bytes: int = 1_000_000
+    max_concurrent_downloads: int = 10
+
+    satellite_timeout_seconds: float = 10.0
+
+    approve_threshold: int = Field(default=70, ge=0, le=100)
+    review_threshold: int = Field(default=45, ge=0, le=100)
+
+    log_level: str = "INFO"
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def parse_cors_origins(cls, value: str | list[str]) -> list[str]:
+        if isinstance(value, str):
+            return [item.strip() for item in value.split(",") if item.strip()]
+        return value
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
