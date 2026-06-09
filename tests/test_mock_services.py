@@ -13,8 +13,8 @@ async def test_mock_ipfs_loads_known_geojson() -> None:
 
     geometry = await service.download_geojson("healthy-forest-cell")
 
-    assert geometry.geojson["type"] == "Feature"
-    assert geometry.geojson["properties"]["mock_satellite_profile"] == "healthy_forest"
+    assert geometry.geojson["type"] == "Polygon"
+    assert "coordinates" in geometry.geojson
 
 
 @pytest.mark.asyncio
@@ -33,6 +33,21 @@ async def test_mock_satellite_provider_uses_geojson_profile() -> None:
     assert healthy.nbr > 0.50
     assert burned.ndvi < 0
     assert burned.nbr < 0
+
+
+@pytest.mark.asyncio
+async def test_mock_satellite_provider_changes_with_measurement_date() -> None:
+    ipfs = MockIPFSService(Settings(environment="test"))
+    provider = MockSatelliteImageryProvider()
+    await ipfs.startup()
+
+    geometry = await ipfs.download_geojson("healthy-forest-cell")
+    dry = await provider.get_observation(geometry, "2026-07-15")
+    wet = await provider.get_observation(geometry, "2026-01-15")
+
+    assert dry.timestamp == "2026-07-15T00:00:00Z"
+    assert wet.timestamp == "2026-01-15T00:00:00Z"
+    assert dry.nir < wet.nir
 
 
 @pytest.mark.asyncio

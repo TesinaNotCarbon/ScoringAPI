@@ -40,6 +40,7 @@ def test_chainlink_score_endpoint_returns_fraud_metadata() -> None:
         "previous_score",
         "score_delta",
         "score_trend",
+        "measurement_date",
         "review_required",
         "flags",
     }
@@ -66,3 +67,18 @@ def test_drastic_improvement_is_flagged_as_suspicious() -> None:
     assert body["score_trend"] == "suspicious_improvement"
     assert body["review_required"] is True
     assert "suspicious_score_improvement" in body["flags"]
+
+
+def test_measurement_date_query_param_affects_mock_observation() -> None:
+    app = create_app(Settings(environment="test"))
+    with TestClient(app) as client:
+        dry_response = client.get("/score/healthy-forest-cell?measurement_date=2026-07-15")
+        wet_response = client.get("/score/healthy-forest-cell?measurement_date=2026-01-15")
+
+    dry = dry_response.json()
+    wet = wet_response.json()
+    assert dry_response.status_code == 200
+    assert wet_response.status_code == 200
+    assert dry["measurement_date"] == "2026-07-15"
+    assert wet["measurement_date"] == "2026-01-15"
+    assert dry["score"] != wet["score"]

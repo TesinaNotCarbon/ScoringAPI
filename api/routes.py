@@ -28,8 +28,9 @@ async def get_score(
     cell_id: str,
     request: Request,
     previous_score: int | None = Query(default=None, ge=0, le=100),
+    measurement_date: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
 ) -> ScoreResponse:
-    return await _score(cell_id, request, previous_score)
+    return await _score(cell_id, request, previous_score, measurement_date)
 
 
 @router.post(
@@ -39,7 +40,7 @@ async def get_score(
     tags=["scoring"],
 )
 async def post_score(payload: ScoreRequest, request: Request) -> ScoreResponse:
-    return await _score(payload.cell_id, request, payload.previous_score)
+    return await _score(payload.cell_id, request, payload.previous_score, payload.measurement_date)
 
 
 @router.get("/chainlink/score/{cell_id}", response_model=ChainlinkScoreResponse, tags=["chainlink"])
@@ -47,21 +48,28 @@ async def get_chainlink_score(
     cell_id: str,
     request: Request,
     previous_score: int | None = Query(default=None, ge=0, le=100),
+    measurement_date: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
 ) -> ChainlinkScoreResponse:
-    result = await _score(cell_id, request, previous_score)
+    result = await _score(cell_id, request, previous_score, measurement_date)
     return ChainlinkScoreResponse(
         score=result.score,
         previous_score=result.previous_score,
         score_delta=result.score_delta,
         score_trend=result.score_trend,
+        measurement_date=result.measurement_date,
         review_required=result.review_required,
         flags=result.flags,
     )
 
 
-async def _score(cell_id: str, request: Request, previous_score: int | None = None) -> ScoreResponse:
+async def _score(
+    cell_id: str,
+    request: Request,
+    previous_score: int | None = None,
+    measurement_date: str | None = None,
+) -> ScoreResponse:
     try:
-        return await request.app.state.scoring_service.score_cell(cell_id, previous_score)
+        return await request.app.state.scoring_service.score_cell(cell_id, previous_score, measurement_date)
     except InvalidCellIdError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     except (IPFSDownloadError, SatelliteDataError) as exc:

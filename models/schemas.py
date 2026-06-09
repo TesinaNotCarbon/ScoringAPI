@@ -27,6 +27,7 @@ class ErrorResponse(BaseModel):
 class ScoreRequest(BaseModel):
     cell_id: str = Field(..., min_length=3, max_length=128, pattern=r"^[a-zA-Z0-9._:-]+$")
     previous_score: int | None = Field(default=None, ge=0, le=100)
+    measurement_date: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
 
 
 class ProjectGeometry(BaseModel):
@@ -58,6 +59,7 @@ class ScoreResponse(BaseModel):
     previous_score: int | None = Field(default=None, ge=0, le=100)
     score_delta: int | None = None
     score_trend: str = "no_baseline"
+    measurement_date: str | None = None
     status: ScoreStatus
     indicators: Indicators
     flags: list[str] = Field(default_factory=list)
@@ -69,5 +71,6 @@ class ChainlinkScoreResponse(BaseModel):
     previous_score: int | None = Field(default=None, ge=0, le=100)
     score_delta: int | None = None
     score_trend: str
+    measurement_date: str | None = None
     review_required: bool
     flags: list[str] = Field(default_factory=list)

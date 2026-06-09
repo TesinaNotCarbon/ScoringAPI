@@ -56,9 +56,9 @@ Key variables:
 ## Endpoints
 
 - `GET /` health check.
-- `GET /score/{cell_id}` full scoring response. Optionally pass `?previous_score=70`.
-- `POST /score` full scoring response with `{ "cell_id": "...", "previous_score": 70 }`.
-- `GET /chainlink/score/{cell_id}` compact Chainlink response. Optionally pass `?previous_score=70`.
+- `GET /score/{cell_id}` full scoring response. Optionally pass `?previous_score=70&measurement_date=2026-07-15`.
+- `POST /score` full scoring response with `{ "cell_id": "...", "previous_score": 70, "measurement_date": "2026-07-15" }`.
+- `GET /chainlink/score/{cell_id}` compact Chainlink response. Optionally pass `?previous_score=70&measurement_date=2026-07-15`.
 
 ## Tests
 
@@ -68,7 +68,7 @@ pytest
 
 ## Mock data
 
-Local/test environments without `PINATA_JWT` use `services/mock_geojsons.json` through `MockIPFSService`.
+Local/test environments without `PINATA_JWT` use `services/mocks/mock_geojsons.json` through `MockIPFSService`.
 
 Available sample cell ids:
 
@@ -78,7 +78,7 @@ Available sample cell ids:
 - `burned-area-cell`
 - `cloudy-cell`
 
-`MockSatelliteImageryProvider` reads `mock_satellite_profile` from GeoJSON properties and applies a deterministic geometry-based adjustment to spectral bands.
+`MockSatelliteImageryProvider` reads profiles and cell-id mappings from `services/mocks/mock_satellite_profiles.json`, then applies deterministic geometry/date adjustments to spectral bands. The mock IPFS GeoJSONs only contain coordinates/geometry data.
 
 ## Production notes
 

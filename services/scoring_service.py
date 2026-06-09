@@ -22,9 +22,14 @@ class ScoringService:
         self.satellite_provider = satellite_provider
         self.fraud_prevention_service = FraudPreventionService(settings)
 
-    async def score_cell(self, cell_id: str, previous_score: int | None = None) -> ScoreResponse:
+    async def score_cell(
+        self,
+        cell_id: str,
+        previous_score: int | None = None,
+        measurement_date: str | None = None,
+    ) -> ScoreResponse:
         geometry = await self.ipfs_service.download_geojson(cell_id)
-        observation = await self.satellite_provider.get_observation(geometry)
+        observation = await self.satellite_provider.get_observation(geometry, measurement_date)
         indicators = calculate_indicators(observation)
         flags = self._build_flags(indicators, observation.cloud_coverage)
         score = self._calculate_score(indicators, flags)
@@ -40,6 +45,7 @@ class ScoringService:
             previous_score=comparison.previous_score,
             score_delta=comparison.score_delta,
             score_trend=comparison.trend,
+            measurement_date=measurement_date,
             status=status,
             indicators=indicators,
             flags=flags,

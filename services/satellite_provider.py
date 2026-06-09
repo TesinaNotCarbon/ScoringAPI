@@ -1,15 +1,24 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
+import json
+from pathlib import Path
 from typing import Any, Protocol
 
 from models.schemas import ProjectGeometry, SatelliteObservation
+
+_MOCK_PROFILES_PATH = Path(__file__).with_name("mocks") / "mock_satellite_profiles.json"
 
 
 class SatelliteImageryProvider(Protocol):
     """Boundary for satellite imagery providers."""
 
-    async def get_observation(self, geometry: ProjectGeometry) -> SatelliteObservation:
+    async def get_observation(
+        self,
+        geometry: ProjectGeometry,
+        measurement_date: str | None = None,
+    ) -> SatelliteObservation:
         ...
 
 
@@ -23,60 +32,102 @@ class MockSpectralProfile:
 
 
 class MockSatelliteImageryProvider:
-    """Deterministic satellite provider with multiple land-cover profiles.
+    """Deterministic satellite provider backed by editable mock files.
 
-    The provider reads the mock profile from GeoJSON properties, then applies a
-    small deterministic geometry-based adjustment. This makes local results more
-    realistic than a simple checksum while keeping tests reproducible.
+    IPFS mock data only contains cell id -> GeoJSON coordinates. The satellite
+    profile mapping lives in ``services/mocks/mock_satellite_profiles.json`` so
+    tests can use real-looking IPFS cell ids and modify scenarios without
+    changing the coordinates stored in IPFS.
     """
 
-    _profiles: dict[str, MockSpectralProfile] = {
-        "healthy_forest": MockSpectralProfile(nir=0.76, red=0.12, blue=0.06, swir=0.18, cloud_coverage=0.04),
-        "early_reforestation": MockSpectralProfile(nir=0.48, red=0.24, blue=0.11, swir=0.30, cloud_coverage=0.10),
-        "degraded_soil": MockSpectralProfile(nir=0.30, red=0.28, blue=0.16, swir=0.36, cloud_coverage=0.08),
-        "burned_area": MockSpectralProfile(nir=0.18, red=0.22, blue=0.14, swir=0.52, cloud_coverage=0.06),
-        "cloudy_vegetation": MockSpectralProfile(nir=0.54, red=0.20, blue=0.28, swir=0.26, cloud_coverage=0.48),
-        "water_or_cloud": MockSpectralProfile(nir=0.06, red=0.08, blue=0.18, swir=0.04, cloud_coverage=0.70),
-    }
+    def __init__(self, profiles_path: Path = _MOCK_PROFILES_PATH) -> None:
+        self.profiles_path = profiles_path
+        self._profiles: dict[str, MockSpectralProfile] = {}
+        self._cell_profiles: dict[str, str] = {}
+        self._date_modifiers: dict[str, Any] = {}
 
     async def startup(self) -> None:
-        return None
+        self._load_profiles()
 
     async def shutdown(self) -> None:
         return None
 
-    async def get_observation(self, geometry: ProjectGeometry) -> SatelliteObservation:
-        profile_name = self._extract_profile_name(geometry.geojson)
-        profile = self._profiles.get(profile_name) or self._profile_from_cell_id(geometry.cell_id)
+    async def get_observation(
+        self,
+        geometry: ProjectGeometry,
+        measurement_date: str | None = None,
+    ) -> SatelliteObservation:
+        if not self._profiles:
+            self._load_profiles()
+
+        profile = self._profile_for_cell_id(geometry.cell_id)
         adjustment = self._geometry_adjustment(geometry.geojson)
+        date_adjustment = self._date_adjustment(measurement_date)
 
         return SatelliteObservation(
-            nir=self._clamp(profile.nir + adjustment),
-            red=self._clamp(profile.red - adjustment / 2),
-            blue=self._clamp(profile.blue + abs(adjustment) / 3),
-            swir=self._clamp(profile.swir - adjustment / 4),
-            timestamp="2026-06-08T00:00:00Z",
-            cloud_coverage=self._clamp(profile.cloud_coverage + abs(adjustment) / 2),
+            nir=self._clamp(profile.nir + adjustment + date_adjustment.nir),
+            red=self._clamp(profile.red - adjustment / 2 + date_adjustment.red),
+            blue=self._clamp(profile.blue + abs(adjustment) / 3 + date_adjustment.blue),
+            swir=self._clamp(profile.swir - adjustment / 4 + date_adjustment.swir),
+            timestamp=f"{measurement_date or '2026-06-08'}T00:00:00Z",
+            cloud_coverage=self._clamp(profile.cloud_coverage + abs(adjustment) / 2 + date_adjustment.cloud_coverage),
         )
 
-    def _extract_profile_name(self, geojson: dict[str, Any]) -> str | None:
-        if geojson.get("type") == "Feature":
-            properties = geojson.get("properties") or {}
-            if isinstance(properties, dict):
-                value = properties.get("mock_satellite_profile")
-                return value if isinstance(value, str) else None
+    def _load_profiles(self) -> None:
+        with self.profiles_path.open("r", encoding="utf-8") as file:
+            data = json.load(file)
 
-        if geojson.get("type") == "FeatureCollection":
-            features = geojson.get("features") or []
-            if features and isinstance(features[0], dict):
-                return self._extract_profile_name(features[0])
+        profiles = data.get("profiles") or {}
+        self._profiles = {
+            name: MockSpectralProfile(**values)
+            for name, values in profiles.items()
+            if isinstance(values, dict)
+        }
+        self._cell_profiles = {
+            cell_id: profile_name
+            for cell_id, profile_name in (data.get("cell_profiles") or {}).items()
+            if isinstance(cell_id, str) and isinstance(profile_name, str)
+        }
+        self._date_modifiers = data.get("date_modifiers") or {}
 
-        return None
+        if not self._profiles:
+            raise ValueError("mock_satellite_profiles.json must define at least one profile")
 
-    def _profile_from_cell_id(self, cell_id: str) -> MockSpectralProfile:
+    def _profile_for_cell_id(self, cell_id: str) -> MockSpectralProfile:
+        configured_profile = self._cell_profiles.get(cell_id)
+        if configured_profile in self._profiles:
+            return self._profiles[configured_profile]
+
         profile_names = sorted(self._profiles)
         checksum = sum(ord(char) for char in cell_id)
         return self._profiles[profile_names[checksum % len(profile_names)]]
+
+    def _date_adjustment(self, measurement_date: str | None) -> MockSpectralProfile:
+        if not measurement_date:
+            return MockSpectralProfile(0, 0, 0, 0, 0)
+
+        try:
+            month = date.fromisoformat(measurement_date).month
+        except ValueError:
+            return MockSpectralProfile(0, 0, 0, 0, 0)
+
+        dry_months = set(self._date_modifiers.get("dry_season_months") or [])
+        wet_months = set(self._date_modifiers.get("wet_season_months") or [])
+
+        if month in dry_months:
+            values = self._date_modifiers.get("dry_season") or {}
+        elif month in wet_months:
+            values = self._date_modifiers.get("wet_season") or {}
+        else:
+            values = {}
+
+        return MockSpectralProfile(
+            nir=float(values.get("nir", 0)),
+            red=float(values.get("red", 0)),
+            blue=float(values.get("blue", 0)),
+            swir=float(values.get("swir", 0)),
+            cloud_coverage=float(values.get("cloud_coverage", 0)),
+        )
 
     def _geometry_adjustment(self, geojson: dict[str, Any]) -> float:
         points = self._extract_points(geojson)
@@ -88,7 +139,6 @@ class MockSatelliteImageryProvider:
         lon_span = max(lon for lon, _ in points) - min(lon for lon, _ in points)
         lat_span = max(lat for _, lat in points) - min(lat for _, lat in points)
 
-        # Small bounded signal based on latitude, longitude and approximate size.
         raw = (avg_lat * 0.0007) + (avg_lon * 0.0003) + ((lon_span + lat_span) * 0.2)
         return max(-0.025, min(0.025, raw))
 
