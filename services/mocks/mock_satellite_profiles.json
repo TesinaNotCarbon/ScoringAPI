@@ -1,0 +1,23 @@
+{
+  "profiles": {
+    "healthy_forest": { "nir": 0.76, "red": 0.12, "blue": 0.06, "swir": 0.18, "cloud_coverage": 0.04 },
+    "early_reforestation": { "nir": 0.48, "red": 0.24, "blue": 0.11, "swir": 0.30, "cloud_coverage": 0.10 },
+    "degraded_soil": { "nir": 0.30, "red": 0.28, "blue": 0.16, "swir": 0.36, "cloud_coverage": 0.08 },
+    "burned_area": { "nir": 0.18, "red": 0.22, "blue": 0.14, "swir": 0.52, "cloud_coverage": 0.06 },
+    "cloudy_vegetation": { "nir": 0.54, "red": 0.20, "blue": 0.28, "swir": 0.26, "cloud_coverage": 0.48 },
+    "water_or_cloud": { "nir": 0.06, "red": 0.08, "blue": 0.18, "swir": 0.04, "cloud_coverage": 0.70 }
+  },
+  "cell_profiles": {
+    "healthy-forest-cell": "healthy_forest",
+    "early-reforestation-cell": "early_reforestation",
+    "degraded-soil-cell": "degraded_soil",
+    "burned-area-cell": "burned_area",
+    "cloudy-cell": "cloudy_vegetation"
+  },
+  "date_modifiers": {
+    "dry_season_months": [6, 7, 8, 9],
+    "wet_season_months": [12, 1, 2, 3],
+    "dry_season": { "nir": -0.03, "red": 0.02, "blue": 0.01, "swir": 0.04, "cloud_coverage": -0.02 },
+    "wet_season": { "nir": 0.03, "red": -0.01, "blue": 0.01, "swir": -0.02, "cloud_coverage": 0.08 }
+  }
+}

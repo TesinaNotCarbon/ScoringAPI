@@ -7,7 +7,7 @@ from typing import Any
 from models.schemas import ProjectGeometry
 from services.ipfs_service import IPFSService
 
-_MOCK_GEOJSONS_PATH = Path(__file__).with_name("mock_geojsons.json")
+_MOCK_GEOJSONS_PATH = Path(__file__).with_name("mocks") / "mock_geojsons.json"
 
 
 class MockIPFSService(IPFSService):
