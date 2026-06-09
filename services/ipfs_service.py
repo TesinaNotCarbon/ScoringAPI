@@ -10,7 +10,6 @@ import aiohttp
 from core.config import Settings
 from core.exceptions import IPFSDownloadError, InvalidCellIdError
 from models.schemas import ProjectGeometry
-from services.geojson import validate_geojson
 
 _CELL_ID_PATTERN = re.compile(r"^[a-zA-Z0-9._:-]{3,128}$")
 
@@ -38,7 +37,6 @@ class IPFSService:
     async def download_geojson(self, cell_id: str) -> ProjectGeometry:
         self._validate_cell_id(cell_id)
         data = await self._download_json(cell_id)
-        validate_geojson(data)
         return ProjectGeometry(cell_id=cell_id, geojson=data)
 
     async def _download_json(self, cell_id: str) -> dict[str, Any]:

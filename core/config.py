@@ -31,6 +31,7 @@ class Settings(BaseSettings):
 
     approve_threshold: int = Field(default=70, ge=0, le=100)
     review_threshold: int = Field(default=45, ge=0, le=100)
+    drastic_improvement_threshold: int = Field(default=25, ge=1, le=100)
 
     log_level: str = "INFO"
 

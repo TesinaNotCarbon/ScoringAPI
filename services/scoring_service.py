@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from core.config import Settings
 from models.schemas import Indicators, ScoreResponse, ScoreStatus
+from services.fraud_prevention_service import FraudPreventionService
 from services.indicators import calculate_indicators
 from services.ipfs_service import IPFSService
 from services.satellite_provider import SatelliteImageryProvider
@@ -19,22 +20,30 @@ class ScoringService:
         self.settings = settings
         self.ipfs_service = ipfs_service
         self.satellite_provider = satellite_provider
+        self.fraud_prevention_service = FraudPreventionService(settings)
 
-    async def score_cell(self, cell_id: str) -> ScoreResponse:
+    async def score_cell(self, cell_id: str, previous_score: int | None = None) -> ScoreResponse:
         geometry = await self.ipfs_service.download_geojson(cell_id)
         observation = await self.satellite_provider.get_observation(geometry)
         indicators = calculate_indicators(observation)
         flags = self._build_flags(indicators, observation.cloud_coverage)
         score = self._calculate_score(indicators, flags)
+
+        comparison = self.fraud_prevention_service.compare_scores(score, previous_score)
+        flags.extend(flag for flag in comparison.flags if flag not in flags)
         status = self._status_for(score, flags)
+        review_required = status == ScoreStatus.REVIEW or comparison.review_required
 
         return ScoreResponse(
             cell_id=cell_id,
             score=score,
+            previous_score=comparison.previous_score,
+            score_delta=comparison.score_delta,
+            score_trend=comparison.trend,
             status=status,
             indicators=indicators,
             flags=flags,
-            review_required=status == ScoreStatus.REVIEW,
+            review_required=review_required,
         )
 
     def _calculate_score(self, indicators: Indicators, flags: list[str]) -> int:
@@ -53,6 +62,8 @@ class ScoringService:
             "possible_burn_or_logging": 25,
             "low_vegetation": 15,
             "indicator_mismatch": 10,
+            "score_regression": 0,
+            "suspicious_score_improvement": 0,
         }
         return sum(penalties.get(flag, 0) for flag in flags)
 

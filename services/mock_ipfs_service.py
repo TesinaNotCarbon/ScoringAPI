@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Any
 
 from models.schemas import ProjectGeometry
-from services.geojson import validate_geojson
 from services.ipfs_service import IPFSService
 
 _MOCK_GEOJSONS_PATH = Path(__file__).with_name("mock_geojsons.json")
@@ -32,7 +31,6 @@ class MockIPFSService(IPFSService):
     async def download_geojson(self, cell_id: str) -> ProjectGeometry:
         self._validate_cell_id(cell_id)
         geojson = self._geojsons.get(cell_id) or self._fallback_geojson(cell_id)
-        validate_geojson(geojson)
         return ProjectGeometry(cell_id=cell_id, geojson=geojson)
 
     def _load_geojsons(self) -> dict[str, dict[str, Any]]:

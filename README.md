@@ -1,6 +1,6 @@
 # Scoring API
 
-Production-ready FastAPI service for environmental/reforestation scoring. It receives a `cell_id`, resolves project geometry from IPFS/Pinata, reads satellite observations through a provider interface, computes NDVI/SAVI/EVI/NBR, and returns a deterministic score suitable for Chainlink Functions or CRE.
+FastAPI service for environmental/reforestation scoring. It receives a `cell_id`, resolves project geometry from IPFS/Pinata, reads satellite observations through a provider interface, computes NDVI/SAVI/EVI/NBR, and returns a deterministic score suitable for Chainlink Functions or CRE.
 
 ## Structure
 
@@ -24,6 +24,23 @@ python main.py
 
 The API listens on `PORT` or `3000` by default.
 
+## Docker
+
+Build and run with Docker:
+
+```bash
+docker build -t scoring-api .
+docker run --rm -p 3000:3000 --env ENVIRONMENT=local scoring-api
+```
+
+Or use Docker Compose:
+
+```bash
+docker compose up --build
+```
+
+The container exposes port `3000` and includes a health check against `GET /`.
+
 ## Environment
 
 Key variables:
@@ -33,14 +50,15 @@ Key variables:
 - `PINATA_GATEWAY_BASE_URL`: Pinata/IPFS gateway base URL.
 - `PINATA_JWT`: Pinata JWT. If omitted in `local`/`test`, a deterministic mock IPFS service is used.
 - `APPROVE_THRESHOLD`, `REVIEW_THRESHOLD`: scoring thresholds.
+- `DRASTIC_IMPROVEMENT_THRESHOLD`: max score increase before flagging suspicious improvement.
 - `CORS_ORIGINS`: comma-separated allowed origins.
 
 ## Endpoints
 
 - `GET /` health check.
-- `GET /score/{cell_id}` full scoring response.
-- `POST /score` full scoring response with `{ "cell_id": "..." }`.
-- `GET /chainlink/score/{cell_id}` compact `{ "score": number }` response.
+- `GET /score/{cell_id}` full scoring response. Optionally pass `?previous_score=70`.
+- `POST /score` full scoring response with `{ "cell_id": "...", "previous_score": 70 }`.
+- `GET /chainlink/score/{cell_id}` compact Chainlink response. Optionally pass `?previous_score=70`.
 
 ## Tests
 

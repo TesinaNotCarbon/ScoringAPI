@@ -1,0 +1,14 @@
+services:
+  scoring-api:
+    build: .
+    image: scoring-api:latest
+    ports:
+      - "3000:3000"
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-local}
+      PORT: ${PORT:-3000}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      PINATA_JWT: ${PINATA_JWT:-}
+      PINATA_GATEWAY_BASE_URL: ${PINATA_GATEWAY_BASE_URL:-https://gateway.pinata.cloud/ipfs}
+      DRASTIC_IMPROVEMENT_THRESHOLD: ${DRASTIC_IMPROVEMENT_THRESHOLD:-25}
+    restart: unless-stopped
