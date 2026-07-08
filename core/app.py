@@ -12,9 +12,10 @@ from api.routes import router
 from core.config import Settings, get_settings
 from core.exceptions import ScoringAPIError
 from core.logging import configure_logging
-from services.ipfs_service import IPFSService
-from services.mock_ipfs_service import MockIPFSService
-from services.satellite_provider import MockSatelliteImageryProvider
+from adapters.ai import GroqAIProvider
+from adapters.ipfs import IPFSService
+from adapters.ipfs.mocks import MockIPFSService
+from adapters.satellite import HTTPSatelliteImageryProvider, MockSatelliteImageryProvider
 from services.scoring_service import ScoringService
 
 logger = logging.getLogger(__name__)
@@ -28,17 +29,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.settings = settings
         ipfs_service = _build_ipfs_service(settings)
-        satellite_provider = MockSatelliteImageryProvider()
+        satellite_provider = _build_satellite_provider(settings)
+        ai_provider = _build_ai_provider(settings)
         app.state.ipfs_service = ipfs_service
         app.state.satellite_provider = satellite_provider
-        app.state.scoring_service = ScoringService(settings, ipfs_service, satellite_provider)
+        app.state.ai_provider = ai_provider
+        app.state.scoring_service = ScoringService(settings, ipfs_service, satellite_provider, ai_provider)
 
         await ipfs_service.startup()
         await satellite_provider.startup()
+        await ai_provider.startup()
         logger.info("Application startup completed")
         try:
             yield
         finally:
+            await ai_provider.shutdown()
             await satellite_provider.shutdown()
             await ipfs_service.shutdown()
             logger.info("Application shutdown completed")
@@ -76,3 +81,13 @@ def _build_ipfs_service(settings: Settings) -> IPFSService:
     if settings.environment in {"local", "test"} and not settings.pinata_jwt:
         return MockIPFSService(settings)
     return IPFSService(settings)
+
+
+def _build_satellite_provider(settings: Settings) -> MockSatelliteImageryProvider | HTTPSatelliteImageryProvider:
+    if settings.satellite_provider == "http":
+        return HTTPSatelliteImageryProvider(settings)
+    return MockSatelliteImageryProvider()
+
+
+def _build_ai_provider(settings: Settings) -> GroqAIProvider:
+    return GroqAIProvider(settings)

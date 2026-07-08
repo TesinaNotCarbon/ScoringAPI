@@ -6,13 +6,23 @@ import json
 from pathlib import Path
 from typing import Any, Protocol
 
+import aiohttp
+
+from core.config import Settings
+from core.exceptions import SatelliteDataError
 from models.schemas import ProjectGeometry, SatelliteObservation
 
-_MOCK_PROFILES_PATH = Path(__file__).with_name("mocks") / "mock_satellite_profiles.json"
+_MOCK_PROFILES_PATH = Path(__file__).parents[2] / "services" / "mocks" / "mock_satellite_profiles.json"
 
 
 class SatelliteImageryProvider(Protocol):
     """Boundary for satellite imagery providers."""
+
+    async def startup(self) -> None:
+        ...
+
+    async def shutdown(self) -> None:
+        ...
 
     async def get_observation(
         self,
@@ -31,14 +41,55 @@ class MockSpectralProfile:
     cloud_coverage: float
 
 
-class MockSatelliteImageryProvider:
-    """Deterministic satellite provider backed by editable mock files.
+class HTTPSatelliteImageryProvider:
+    """HTTP adapter for external satellite imagery providers.
 
-    IPFS mock data only contains cell id -> GeoJSON coordinates. The satellite
-    profile mapping lives in ``services/mocks/mock_satellite_profiles.json`` so
-    tests can use real-looking IPFS cell ids and modify scenarios without
-    changing the coordinates stored in IPFS.
+    The remote service is expected to accept cell geometry and optional
+    measurement date, and return the SatelliteObservation JSON shape.
     """
+
+    def __init__(self, settings: Settings) -> None:
+        if not settings.satellite_provider_base_url:
+            raise SatelliteDataError("satellite_provider_base_url is required for http adapter")
+        self.settings = settings
+        self._session: aiohttp.ClientSession | None = None
+
+    async def startup(self) -> None:
+        headers = {"Content-Type": "application/json"}
+        if self.settings.satellite_provider_api_key:
+            headers["Authorization"] = f"Bearer {self.settings.satellite_provider_api_key}"
+        self._session = aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=self.settings.satellite_timeout_seconds),
+            headers=headers,
+        )
+
+    async def shutdown(self) -> None:
+        if self._session:
+            await self._session.close()
+            self._session = None
+
+    async def get_observation(
+        self,
+        geometry: ProjectGeometry,
+        measurement_date: str | None = None,
+    ) -> SatelliteObservation:
+        if self._session is None:
+            await self.startup()
+        url = f"{str(self.settings.satellite_provider_base_url).rstrip('/')}{self.settings.satellite_provider_observation_path}"
+        payload = {"cell_id": geometry.cell_id, "geojson": geometry.geojson, "measurement_date": measurement_date}
+        try:
+            assert self._session is not None
+            async with self._session.post(url, json=payload) as response:
+                data = await response.json()
+                if response.status >= 400:
+                    raise SatelliteDataError(f"Satellite provider returned {response.status}: {data}")
+                return SatelliteObservation.model_validate(data)
+        except (aiohttp.ClientError, ValueError) as exc:
+            raise SatelliteDataError(f"Satellite provider response could not be processed: {exc}") from exc
+
+
+class MockSatelliteImageryProvider:
+    """Deterministic satellite provider backed by editable mock files."""
 
     def __init__(self, profiles_path: Path = _MOCK_PROFILES_PATH) -> None:
         self.profiles_path = profiles_path

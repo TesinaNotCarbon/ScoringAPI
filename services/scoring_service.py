@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from adapters.ai import AIProvider
+from adapters.ipfs import IPFSService
+from adapters.satellite import SatelliteImageryProvider
 from core.config import Settings
-from models.schemas import Indicators, ScoreResponse, ScoreStatus
+from models.schemas import ChainlinkScoreResponse, CriticalityLevel, FraudAnalysisRequest, Indicators, ScoreResponse
 from services.fraud_prevention_service import FraudPreventionService
 from services.indicators import calculate_indicators
-from services.ipfs_service import IPFSService
-from services.satellite_provider import SatelliteImageryProvider
 
 
 class ScoringService:
@@ -16,10 +17,12 @@ class ScoringService:
         settings: Settings,
         ipfs_service: IPFSService,
         satellite_provider: SatelliteImageryProvider,
+        ai_provider: AIProvider,
     ) -> None:
         self.settings = settings
         self.ipfs_service = ipfs_service
         self.satellite_provider = satellite_provider
+        self.ai_provider = ai_provider
         self.fraud_prevention_service = FraudPreventionService(settings)
 
     async def score_cell(
@@ -36,20 +39,59 @@ class ScoringService:
 
         comparison = self.fraud_prevention_service.compare_scores(score, previous_score)
         flags.extend(flag for flag in comparison.flags if flag not in flags)
-        status = self._status_for(score, flags)
-        review_required = status == ScoreStatus.REVIEW or comparison.review_required
+        analysis = await self.ai_provider.analyze_fraud(
+            FraudAnalysisRequest(
+                cell_id=cell_id,
+                score=score,
+                previous_score=comparison.previous_score,
+                score_delta=comparison.score_delta,
+                score_trend=comparison.trend,
+                measurement_date=measurement_date,
+                indicators=indicators,
+                flags=flags,
+            )
+        )
 
         return ScoreResponse(
+            score=score,
+            criticality=analysis.criticality,
+            description=analysis.description,
+            measurement_date=measurement_date,
+        )
+
+    async def score_cell_for_consensus(
+        self,
+        cell_id: str,
+        previous_score: int | None = None,
+        measurement_date: str | None = None,
+    ) -> ChainlinkScoreResponse:
+        """Return deterministic fields intended for Chainlink DON consensus.
+
+        This path intentionally does not call the LLM: free-text descriptions are
+        not useful for oracle consensus and can differ between equivalent nodes.
+        """
+        geometry = await self.ipfs_service.download_geojson(cell_id)
+        observation = await self.satellite_provider.get_observation(geometry, measurement_date)
+        indicators = calculate_indicators(observation)
+        flags = self._build_flags(indicators, observation.cloud_coverage)
+        score = self._calculate_score(indicators, flags)
+
+        comparison = self.fraud_prevention_service.compare_scores(score, previous_score)
+        flags.extend(flag for flag in comparison.flags if flag not in flags)
+        criticality = self._deterministic_criticality(score, flags)
+
+        return ChainlinkScoreResponse(
             cell_id=cell_id,
             score=score,
-            previous_score=comparison.previous_score,
-            score_delta=comparison.score_delta,
-            score_trend=comparison.trend,
+            criticality=criticality,
+            criticality_code={
+                CriticalityLevel.LOW: 0,
+                CriticalityLevel.MEDIUM: 1,
+                CriticalityLevel.HIGH: 2,
+            }[criticality],
+            decision=self._decision(score),
+            flags=sorted(flags),
             measurement_date=measurement_date,
-            status=status,
-            indicators=indicators,
-            flags=flags,
-            review_required=review_required,
         )
 
     def _calculate_score(self, indicators: Indicators, flags: list[str]) -> int:
@@ -85,12 +127,19 @@ class ScoringService:
             flags.append("indicator_mismatch")
         return flags
 
-    def _status_for(self, score: int, flags: list[str]) -> ScoreStatus:
-        if "possible_burn_or_logging" in flags or score < self.settings.review_threshold:
-            return ScoreStatus.REJECTED
-        if flags or score < self.settings.approve_threshold:
-            return ScoreStatus.REVIEW
-        return ScoreStatus.APPROVED
+    def _deterministic_criticality(self, score: int, flags: list[str]) -> CriticalityLevel:
+        if score < self.settings.review_threshold or "possible_burn_or_logging" in flags:
+            return CriticalityLevel.HIGH
+        if score < self.settings.approve_threshold or flags:
+            return CriticalityLevel.MEDIUM
+        return CriticalityLevel.LOW
+
+    def _decision(self, score: int) -> str:
+        if score >= self.settings.approve_threshold:
+            return "approve"
+        if score >= self.settings.review_threshold:
+            return "review"
+        return "reject"
 
     def _normalize(self, value: float) -> float:
         return max(0.0, min(100.0, (value + 1) * 50))

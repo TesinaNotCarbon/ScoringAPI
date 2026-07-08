@@ -6,10 +6,10 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 
-class ScoreStatus(str, Enum):
-    APPROVED = "approved"
-    REVIEW = "review"
-    REJECTED = "rejected"
+class CriticalityLevel(str, Enum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
 
 
 class HealthResponse(BaseModel):
@@ -53,24 +53,35 @@ class Indicators(BaseModel):
     nbr: float
 
 
-class ScoreResponse(BaseModel):
+class FraudAnalysis(BaseModel):
+    criticality: CriticalityLevel
+    description: str = Field(..., min_length=1)
+
+
+class FraudAnalysisRequest(BaseModel):
     cell_id: str
     score: int = Field(..., ge=0, le=100)
     previous_score: int | None = Field(default=None, ge=0, le=100)
     score_delta: int | None = None
     score_trend: str = "no_baseline"
     measurement_date: str | None = None
-    status: ScoreStatus
     indicators: Indicators
     flags: list[str] = Field(default_factory=list)
-    review_required: bool
+
+
+class ScoreResponse(BaseModel):
+    score: int = Field(..., ge=0, le=100)
+    criticality: CriticalityLevel
+    description: str
+    measurement_date: str | None = None
 
 
 class ChainlinkScoreResponse(BaseModel):
+    cell_id: str
     score: int = Field(..., ge=0, le=100)
-    previous_score: int | None = Field(default=None, ge=0, le=100)
-    score_delta: int | None = None
-    score_trend: str
-    measurement_date: str | None = None
-    review_required: bool
+    criticality: CriticalityLevel
+    criticality_code: int = Field(..., ge=0, le=2, description="0=low, 1=medium, 2=high")
+    decision: str = Field(..., description="approve, review, or reject")
     flags: list[str] = Field(default_factory=list)
+    measurement_date: str | None = None
+    schema_version: str = "chainlink-score-v1"

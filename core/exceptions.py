@@ -13,3 +13,7 @@ class IPFSDownloadError(ScoringAPIError):
 
 class SatelliteDataError(ScoringAPIError):
     """Raised when satellite data is unavailable or invalid."""
+
+
+class AIProviderError(ScoringAPIError):
+    """Raised when AI fraud analysis is unavailable or invalid."""

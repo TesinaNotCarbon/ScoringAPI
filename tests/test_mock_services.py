@@ -2,8 +2,8 @@ import pytest
 
 from core.config import Settings
 from services.indicators import calculate_indicators
-from services.mock_ipfs_service import MockIPFSService
-from services.satellite_provider import MockSatelliteImageryProvider
+from adapters.ipfs.mocks import MockIPFSService
+from adapters.satellite import MockSatelliteImageryProvider
 
 
 @pytest.mark.asyncio

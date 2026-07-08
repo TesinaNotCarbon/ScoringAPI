@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
 
-from core.exceptions import InvalidCellIdError, IPFSDownloadError, SatelliteDataError
+from core.exceptions import AIProviderError, InvalidCellIdError, IPFSDownloadError, SatelliteDataError
 from models.schemas import ChainlinkScoreResponse, ErrorResponse, HealthResponse, ScoreRequest, ScoreResponse
 
 router = APIRouter()
@@ -50,16 +50,16 @@ async def get_chainlink_score(
     previous_score: int | None = Query(default=None, ge=0, le=100),
     measurement_date: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
 ) -> ChainlinkScoreResponse:
-    result = await _score(cell_id, request, previous_score, measurement_date)
-    return ChainlinkScoreResponse(
-        score=result.score,
-        previous_score=result.previous_score,
-        score_delta=result.score_delta,
-        score_trend=result.score_trend,
-        measurement_date=result.measurement_date,
-        review_required=result.review_required,
-        flags=result.flags,
-    )
+    try:
+        return await request.app.state.scoring_service.score_cell_for_consensus(
+            cell_id,
+            previous_score,
+            measurement_date,
+        )
+    except InvalidCellIdError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    except (IPFSDownloadError, SatelliteDataError) as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
 
 async def _score(
@@ -72,5 +72,5 @@ async def _score(
         return await request.app.state.scoring_service.score_cell(cell_id, previous_score, measurement_date)
     except InvalidCellIdError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
-    except (IPFSDownloadError, SatelliteDataError) as exc:
+    except (IPFSDownloadError, SatelliteDataError, AIProviderError) as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc

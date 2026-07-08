@@ -12,15 +12,16 @@ def test_health_check() -> None:
     assert response.json()["status"] == "ok"
 
 
-def test_score_endpoint_returns_full_result() -> None:
+def test_score_endpoint_returns_simplified_result() -> None:
     app = create_app(Settings(environment="test"))
     with TestClient(app) as client:
         response = client.get("/score/test-cell-123")
     body = response.json()
     assert response.status_code == 200
-    assert body["cell_id"] == "test-cell-123"
+    assert set(body) == {"score", "criticality", "description", "measurement_date"}
     assert 0 <= body["score"] <= 100
-    assert set(body["indicators"]) == {"ndvi", "savi", "evi", "nbr"}
+    assert body["criticality"] in {"low", "medium", "high"}
+    assert body["description"]
 
 
 def test_invalid_cell_id_is_rejected() -> None:
@@ -30,43 +31,45 @@ def test_invalid_cell_id_is_rejected() -> None:
     assert response.status_code == 422
 
 
-def test_chainlink_score_endpoint_returns_fraud_metadata() -> None:
+def test_chainlink_score_endpoint_returns_consensus_payload_without_description() -> None:
     app = create_app(Settings(environment="test"))
     with TestClient(app) as client:
         response = client.get("/chainlink/score/test-cell-123")
+    body = response.json()
     assert response.status_code == 200
-    assert set(response.json()) == {
+    assert set(body) == {
+        "cell_id",
         "score",
-        "previous_score",
-        "score_delta",
-        "score_trend",
-        "measurement_date",
-        "review_required",
+        "criticality",
+        "criticality_code",
+        "decision",
         "flags",
+        "measurement_date",
+        "schema_version",
     }
+    assert "description" not in body
+    assert body["criticality_code"] in {0, 1, 2}
+    assert body["decision"] in {"approve", "review", "reject"}
 
 
-def test_previous_score_regression_requires_review() -> None:
+def test_previous_score_regression_is_sent_to_ai_analysis() -> None:
     app = create_app(Settings(environment="test"))
     with TestClient(app) as client:
         response = client.post("/score", json={"cell_id": "test-cell-123", "previous_score": 100})
     body = response.json()
     assert response.status_code == 200
-    assert body["score_trend"] == "regressed"
-    assert body["score_delta"] < 0
-    assert body["review_required"] is True
-    assert "score_regression" in body["flags"]
+    assert body["criticality"] in {"medium", "high"}
+    assert "score_regression" in body["description"]
 
 
-def test_drastic_improvement_is_flagged_as_suspicious() -> None:
+def test_drastic_improvement_is_sent_to_ai_analysis() -> None:
     app = create_app(Settings(environment="test", drastic_improvement_threshold=1))
     with TestClient(app) as client:
         response = client.get("/score/healthy-forest-cell?previous_score=0")
     body = response.json()
     assert response.status_code == 200
-    assert body["score_trend"] == "suspicious_improvement"
-    assert body["review_required"] is True
-    assert "suspicious_score_improvement" in body["flags"]
+    assert body["criticality"] == "medium"
+    assert "suspicious_score_improvement" in body["description"]
 
 
 def test_measurement_date_query_param_affects_mock_observation() -> None:

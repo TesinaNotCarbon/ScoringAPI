@@ -4,10 +4,10 @@ import json
 from pathlib import Path
 from typing import Any
 
+from adapters.ipfs.service import IPFSService
 from models.schemas import ProjectGeometry
-from services.ipfs_service import IPFSService
 
-_MOCK_GEOJSONS_PATH = Path(__file__).with_name("mocks") / "mock_geojsons.json"
+_MOCK_GEOJSONS_PATH = Path(__file__).with_name("mock_geojsons.json")
 
 
 class MockIPFSService(IPFSService):
@@ -17,10 +17,6 @@ class MockIPFSService(IPFSService):
     cell ids are mapped deterministically to one of the sample geometries so the
     API remains useful for Chainlink/local testing without Pinata credentials.
     """
-
-    def __init__(self, settings) -> None:  # type: ignore[no-untyped-def]
-        super().__init__(settings)
-        self._geojsons: dict[str, dict[str, Any]] = {}
 
     async def startup(self) -> None:
         self._geojsons = self._load_geojsons()
