@@ -1,16 +1,18 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from adapters.ai import AIProvider
+from adapters.blockchain import ProjectManagerClient
 from adapters.ipfs import IPFSService
 from adapters.satellite import SatelliteImageryProvider
 from core.config import Settings
-from models.schemas import ChainlinkScoreResponse, CriticalityLevel, FraudAnalysisRequest, Indicators, ScoreResponse
-from services.fraud_prevention_service import FraudPreventionService
+from models.schemas import ChainlinkScoreResponse, Indicators, ProjectScoringAnalysisRequest, ScoreResponse
 from services.indicators import calculate_indicators
 
 
 class ScoringService:
-    """Application use case for scoring a project cell."""
+    """Application use case for scoring a project through ProjectManager data."""
 
     def __init__(
         self,
@@ -18,102 +20,53 @@ class ScoringService:
         ipfs_service: IPFSService,
         satellite_provider: SatelliteImageryProvider,
         ai_provider: AIProvider,
+        project_manager: ProjectManagerClient,
     ) -> None:
         self.settings = settings
         self.ipfs_service = ipfs_service
         self.satellite_provider = satellite_provider
         self.ai_provider = ai_provider
-        self.fraud_prevention_service = FraudPreventionService(settings)
+        self.project_manager = project_manager
 
-    async def score_cell(
-        self,
-        cell_id: str,
-        previous_score: int | None = None,
-        measurement_date: str | None = None,
-    ) -> ScoreResponse:
+    async def score_project(self, project_id: str) -> ScoreResponse:
+        cell_id = await self.project_manager.get_project_cell_id(project_id)
+        previous_history = await self.project_manager.get_project_scoring_history(project_id)
+
         geometry = await self.ipfs_service.download_geojson(cell_id)
-        observation = await self.satellite_provider.get_observation(geometry, measurement_date)
+        observation = await self.satellite_provider.get_observation(geometry)
         indicators = calculate_indicators(observation)
         flags = self._build_flags(indicators, observation.cloud_coverage)
-        score = self._calculate_score(indicators, flags)
+        measurement_date = self._measurement_date_from_timestamp(observation.timestamp)
 
-        comparison = self.fraud_prevention_service.compare_scores(score, previous_score)
-        flags.extend(flag for flag in comparison.flags if flag not in flags)
-        analysis = await self.ai_provider.analyze_fraud(
-            FraudAnalysisRequest(
+        analysis = await self.ai_provider.analyze_project_scoring(
+            ProjectScoringAnalysisRequest(
+                project_id=project_id,
                 cell_id=cell_id,
-                score=score,
-                previous_score=comparison.previous_score,
-                score_delta=comparison.score_delta,
-                score_trend=comparison.trend,
                 measurement_date=measurement_date,
                 indicators=indicators,
+                cloud_coverage=observation.cloud_coverage,
                 flags=flags,
+                previous_scoring_history=previous_history,
             )
         )
 
         return ScoreResponse(
-            score=score,
-            criticality=analysis.criticality,
-            description=analysis.description,
-            measurement_date=measurement_date,
-        )
-
-    async def score_cell_for_consensus(
-        self,
-        cell_id: str,
-        previous_score: int | None = None,
-        measurement_date: str | None = None,
-    ) -> ChainlinkScoreResponse:
-        """Return deterministic fields intended for Chainlink DON consensus.
-
-        This path intentionally does not call the LLM: free-text descriptions are
-        not useful for oracle consensus and can differ between equivalent nodes.
-        """
-        geometry = await self.ipfs_service.download_geojson(cell_id)
-        observation = await self.satellite_provider.get_observation(geometry, measurement_date)
-        indicators = calculate_indicators(observation)
-        flags = self._build_flags(indicators, observation.cloud_coverage)
-        score = self._calculate_score(indicators, flags)
-
-        comparison = self.fraud_prevention_service.compare_scores(score, previous_score)
-        flags.extend(flag for flag in comparison.flags if flag not in flags)
-        criticality = self._deterministic_criticality(score, flags)
-
-        return ChainlinkScoreResponse(
+            project_id=project_id,
             cell_id=cell_id,
-            score=score,
-            criticality=criticality,
-            criticality_code={
-                CriticalityLevel.LOW: 0,
-                CriticalityLevel.MEDIUM: 1,
-                CriticalityLevel.HIGH: 2,
-            }[criticality],
-            decision=self._decision(score),
-            flags=sorted(flags),
+            scoring=analysis.scoring,
+            fraud_scoring=analysis.fraud_scoring,
             measurement_date=measurement_date,
         )
 
-    def _calculate_score(self, indicators: Indicators, flags: list[str]) -> int:
-        ndvi_score = self._normalize(indicators.ndvi)
-        savi_score = self._normalize(indicators.savi)
-        evi_score = self._normalize(indicators.evi)
-        nbr_score = self._normalize(indicators.nbr)
-
-        weighted = ndvi_score * 0.35 + savi_score * 0.25 + evi_score * 0.25 + nbr_score * 0.15
-        penalty = self._calculate_penalty(flags)
-        return max(0, min(100, round(weighted - penalty)))
-
-    def _calculate_penalty(self, flags: list[str]) -> int:
-        penalties = {
-            "high_cloud_coverage": 10,
-            "possible_burn_or_logging": 25,
-            "low_vegetation": 15,
-            "indicator_mismatch": 10,
-            "score_regression": 0,
-            "suspicious_score_improvement": 0,
-        }
-        return sum(penalties.get(flag, 0) for flag in flags)
+    async def score_project_for_consensus(self, project_id: str) -> ChainlinkScoreResponse:
+        response = await self.score_project(project_id)
+        return ChainlinkScoreResponse(
+            project_id=response.project_id,
+            cell_id=response.cell_id,
+            scoring=self._scale_score(response.scoring),
+            fraud_scoring=self._scale_score(response.fraud_scoring),
+            measurement_date=response.measurement_date,
+        )
 
     def _build_flags(self, indicators: Indicators, cloud_coverage: float) -> list[str]:
         flags: list[str] = []
@@ -127,19 +80,15 @@ class ScoringService:
             flags.append("indicator_mismatch")
         return flags
 
-    def _deterministic_criticality(self, score: int, flags: list[str]) -> CriticalityLevel:
-        if score < self.settings.review_threshold or "possible_burn_or_logging" in flags:
-            return CriticalityLevel.HIGH
-        if score < self.settings.approve_threshold or flags:
-            return CriticalityLevel.MEDIUM
-        return CriticalityLevel.LOW
+    def _measurement_date_from_timestamp(self, timestamp: str) -> int:
+        normalized = timestamp.replace("Z", "+00:00")
+        try:
+            parsed = datetime.fromisoformat(normalized)
+        except ValueError:
+            return int(datetime.now(tz=timezone.utc).timestamp())
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return int(parsed.timestamp())
 
-    def _decision(self, score: int) -> str:
-        if score >= self.settings.approve_threshold:
-            return "approve"
-        if score >= self.settings.review_threshold:
-            return "review"
-        return "reject"
-
-    def _normalize(self, value: float) -> float:
-        return max(0.0, min(100.0, (value + 1) * 50))
+    def _scale_score(self, score: str) -> int:
+        return int(round(float(score) * 100))

@@ -3,6 +3,8 @@ from fastapi.testclient import TestClient
 from core.app import create_app
 from core.config import Settings
 
+PROJECT_ID = "0x0000000000000000000000000000000000000001"
+
 
 def test_health_check() -> None:
     app = create_app(Settings(environment="test"))
@@ -12,76 +14,49 @@ def test_health_check() -> None:
     assert response.json()["status"] == "ok"
 
 
-def test_score_endpoint_returns_simplified_result() -> None:
+def test_score_endpoint_receives_project_id_only() -> None:
     app = create_app(Settings(environment="test"))
     with TestClient(app) as client:
-        response = client.get("/score/test-cell-123")
+        response = client.get(f"/score/{PROJECT_ID}")
     body = response.json()
     assert response.status_code == 200
-    assert set(body) == {"score", "criticality", "description", "measurement_date"}
-    assert 0 <= body["score"] <= 100
-    assert body["criticality"] in {"low", "medium", "high"}
-    assert body["description"]
+    assert set(body) == {"project_id", "cell_id", "scoring", "fraud_scoring", "measurement_date"}
+    assert body["project_id"] == PROJECT_ID
+    assert body["cell_id"] == "test-cell-123"
+    assert body["scoring"] == "0.80"
+    assert body["fraud_scoring"] in {"0.10", "0.50"}
+    assert isinstance(body["measurement_date"], int)
 
 
-def test_invalid_cell_id_is_rejected() -> None:
+def test_invalid_project_id_is_rejected() -> None:
     app = create_app(Settings(environment="test"))
     with TestClient(app) as client:
-        response = client.get("/score/not valid")
+        response = client.get("/score/not-valid")
     assert response.status_code == 422
 
 
-def test_chainlink_score_endpoint_returns_consensus_payload_without_description() -> None:
+def test_post_score_accepts_only_project_id() -> None:
     app = create_app(Settings(environment="test"))
     with TestClient(app) as client:
-        response = client.get("/chainlink/score/test-cell-123")
-    body = response.json()
+        response = client.post("/score", json={"project_id": PROJECT_ID})
     assert response.status_code == 200
-    assert set(body) == {
-        "cell_id",
-        "score",
-        "criticality",
-        "criticality_code",
-        "decision",
-        "flags",
-        "measurement_date",
-        "schema_version",
-    }
-    assert "description" not in body
-    assert body["criticality_code"] in {0, 1, 2}
-    assert body["decision"] in {"approve", "review", "reject"}
+    assert response.json()["project_id"] == PROJECT_ID
 
 
-def test_previous_score_regression_is_sent_to_ai_analysis() -> None:
+def test_old_cell_id_payload_is_rejected() -> None:
     app = create_app(Settings(environment="test"))
     with TestClient(app) as client:
         response = client.post("/score", json={"cell_id": "test-cell-123", "previous_score": 100})
-    body = response.json()
-    assert response.status_code == 200
-    assert body["criticality"] in {"medium", "high"}
-    assert "score_regression" in body["description"]
+    assert response.status_code == 422
 
 
-def test_drastic_improvement_is_sent_to_ai_analysis() -> None:
-    app = create_app(Settings(environment="test", drastic_improvement_threshold=1))
-    with TestClient(app) as client:
-        response = client.get("/score/healthy-forest-cell?previous_score=0")
-    body = response.json()
-    assert response.status_code == 200
-    assert body["criticality"] == "medium"
-    assert "suspicious_score_improvement" in body["description"]
-
-
-def test_measurement_date_query_param_affects_mock_observation() -> None:
+def test_chainlink_score_endpoint_returns_scaled_contract_payload() -> None:
     app = create_app(Settings(environment="test"))
     with TestClient(app) as client:
-        dry_response = client.get("/score/healthy-forest-cell?measurement_date=2026-07-15")
-        wet_response = client.get("/score/healthy-forest-cell?measurement_date=2026-01-15")
-
-    dry = dry_response.json()
-    wet = wet_response.json()
-    assert dry_response.status_code == 200
-    assert wet_response.status_code == 200
-    assert dry["measurement_date"] == "2026-07-15"
-    assert wet["measurement_date"] == "2026-01-15"
-    assert dry["score"] != wet["score"]
+        response = client.get(f"/chainlink/score/{PROJECT_ID}")
+    body = response.json()
+    assert response.status_code == 200
+    assert set(body) == {"project_id", "cell_id", "scoring", "fraud_scoring", "measurement_date", "schema_version"}
+    assert body["scoring"] == 80
+    assert body["fraud_scoring"] in {10, 50}
+    assert body["schema_version"] == "chainlink-project-scoring-v1"

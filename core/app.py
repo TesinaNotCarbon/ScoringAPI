@@ -13,6 +13,7 @@ from core.config import Settings, get_settings
 from core.exceptions import ScoringAPIError
 from core.logging import configure_logging
 from adapters.ai import GroqAIProvider
+from adapters.blockchain import MockProjectManagerAdapter, ProjectManagerAdapter, ProjectManagerClient
 from adapters.ipfs import IPFSService
 from adapters.ipfs.mocks import MockIPFSService
 from adapters.satellite import HTTPSatelliteImageryProvider, MockSatelliteImageryProvider
@@ -31,18 +32,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         ipfs_service = _build_ipfs_service(settings)
         satellite_provider = _build_satellite_provider(settings)
         ai_provider = _build_ai_provider(settings)
+        project_manager = _build_project_manager(settings)
         app.state.ipfs_service = ipfs_service
         app.state.satellite_provider = satellite_provider
         app.state.ai_provider = ai_provider
-        app.state.scoring_service = ScoringService(settings, ipfs_service, satellite_provider, ai_provider)
+        app.state.project_manager = project_manager
+        app.state.scoring_service = ScoringService(settings, ipfs_service, satellite_provider, ai_provider, project_manager)
 
         await ipfs_service.startup()
         await satellite_provider.startup()
         await ai_provider.startup()
+        await project_manager.startup()
         logger.info("Application startup completed")
         try:
             yield
         finally:
+            await project_manager.shutdown()
             await ai_provider.shutdown()
             await satellite_provider.shutdown()
             await ipfs_service.shutdown()
@@ -91,3 +96,9 @@ def _build_satellite_provider(settings: Settings) -> MockSatelliteImageryProvide
 
 def _build_ai_provider(settings: Settings) -> GroqAIProvider:
     return GroqAIProvider(settings)
+
+
+def _build_project_manager(settings: Settings) -> ProjectManagerClient:
+    if settings.blockchain_adapter == "web3":
+        return ProjectManagerAdapter(settings)
+    return MockProjectManagerAdapter()

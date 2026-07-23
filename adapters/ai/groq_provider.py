@@ -8,11 +8,11 @@ from pydantic import BaseModel, Field, ValidationError
 
 from core.config import Settings
 from core.exceptions import AIProviderError
-from models.schemas import FraudAnalysis, FraudAnalysisRequest
+from models.schemas import AIScoringResponse, ProjectScoringAnalysisRequest
 
 
 class AIProvider(Protocol):
-    """Boundary for LLM/AI fraud analysis providers."""
+    """Boundary for LLM/AI project scoring providers."""
 
     async def startup(self) -> None:
         ...
@@ -20,7 +20,7 @@ class AIProvider(Protocol):
     async def shutdown(self) -> None:
         ...
 
-    async def analyze_fraud(self, request: FraudAnalysisRequest) -> FraudAnalysis:
+    async def analyze_project_scoring(self, request: ProjectScoringAnalysisRequest) -> AIScoringResponse:
         ...
 
 
@@ -37,12 +37,7 @@ class GroqChatCompletionRequest(BaseModel):
 
 
 class GroqAIProvider:
-    """Groq OpenAI-compatible chat adapter.
-
-    Groq exposes an OpenAI-compatible chat completions API at
-    https://api.groq.com/openai/v1/chat/completions. The free tier can be used
-    by providing a Groq API key through GROQ_API_KEY.
-    """
+    """Groq OpenAI-compatible chat adapter."""
 
     def __init__(self, settings: Settings) -> None:
         if not settings.groq_api_key:
@@ -64,7 +59,7 @@ class GroqAIProvider:
             await self._session.close()
             self._session = None
 
-    async def analyze_fraud(self, request: FraudAnalysisRequest) -> FraudAnalysis:
+    async def analyze_project_scoring(self, request: ProjectScoringAnalysisRequest) -> AIScoringResponse:
         if self._session is None:
             await self.startup()
 
@@ -74,10 +69,12 @@ class GroqAIProvider:
                 GroqMessage(
                     role="system",
                     content=(
-                        "Eres un auditor de fraude en proyectos de carbono basados en imágenes satelitales. "
-                        "Responde exclusivamente JSON válido con las claves criticality y description. "
-                        "criticality debe ser low, medium o high. "
-                        "description debe incluir un resumen breve y una recomendación para un administrador."
+                        "You are a scoring engine for carbon/reforestation projects. "
+                        "Return only valid JSON with exactly these two keys: scoring and fraud_scoring. "
+                        "Both values must be strings containing a number between 0.00 and 1.00 with exactly two decimals. "
+                        "scoring is the environmental/carbon integrity score, where 0.00 is extremely poor evidence and 1.00 is excellent evidence. "
+                        "fraud_scoring is fraud risk, where 0.00 means no fraud risk and 1.00 means maximum fraud risk. "
+                        "Do not include explanations, markdown, or extra keys."
                     ),
                 ),
                 GroqMessage(role="user", content=self._build_prompt(request)),
@@ -93,17 +90,19 @@ class GroqAIProvider:
                     raise AIProviderError(f"Groq returned {response.status}: {text[:300]}")
                 data = json.loads(text)
                 content = self._extract_content(data)
-                return FraudAnalysis.model_validate_json(content)
+                return AIScoringResponse.model_validate_json(content)
         except (aiohttp.ClientError, json.JSONDecodeError, ValidationError) as exc:
             raise AIProviderError(f"Groq response could not be processed: {exc}") from exc
 
-    def _build_prompt(self, request: FraudAnalysisRequest) -> str:
+    def _build_prompt(self, request: ProjectScoringAnalysisRequest) -> str:
         return (
-            "Analiza posible fraude con estos datos del proyecto y mediciones.\n"
-            "Devuelve únicamente JSON con este schema:\n"
-            "{\"criticality\": \"low|medium|high\", \"description\": \"resumen y recomendación\"}\n"
-            "Considera flags, score actual, comparación contra score anterior, tendencia e indicadores satelitales.\n"
-            f"Datos: {request.model_dump_json()}"
+            "Evaluate this carbon/reforestation project using current satellite indicators and previous on-chain scoring history.\n"
+            "Use current indicators to determine scoring. Use previous scoring history, score volatility, suspicious jumps, "
+            "repeated fraud scores, indicator inconsistency, burn/logging signals, and cloud coverage to determine fraud_scoring.\n"
+            "Consider NDVI, SAVI, EVI, NBR, cloud coverage, sudden large improvements or regressions, repeated high fraud scores, "
+            "and whether the current state is inconsistent with historical trend.\n"
+            "Return only JSON in this exact shape: {\"scoring\": \"0.00\", \"fraud_scoring\": \"0.00\"}\n"
+            f"Project data: {request.model_dump_json()}"
         )
 
     def _extract_content(self, data: dict[str, Any]) -> str:
@@ -112,6 +111,6 @@ class GroqAIProvider:
             message = choices[0].get("message") or {}
             if isinstance(message.get("content"), str):
                 return message["content"]
-        if isinstance(data.get("criticality"), str):
+        if isinstance(data.get("scoring"), str) and isinstance(data.get("fraud_scoring"), str):
             return json.dumps(data)
-        raise AIProviderError("Groq response does not contain analyzable content")
+        raise AIProviderError("Groq response does not contain scoring content")
