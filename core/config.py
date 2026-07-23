@@ -33,6 +33,11 @@ class Settings(BaseSettings):
     satellite_provider_observation_path: str = "/observations"
     satellite_provider_api_key: str | None = None
 
+    rpc_url: str | None = None
+    project_manager_address: str | None = None
+    project_manager_abi_path: str | None = None
+    blockchain_adapter: Literal["mock", "web3"] = "mock"
+
     groq_base_url: AnyHttpUrl = "https://api.groq.com/openai/v1"
     groq_chat_path: str = "/chat/completions"
     groq_api_key: str | None = None

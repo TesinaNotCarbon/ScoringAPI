@@ -16,4 +16,8 @@ class SatelliteDataError(ScoringAPIError):
 
 
 class AIProviderError(ScoringAPIError):
-    """Raised when AI fraud analysis is unavailable or invalid."""
+    """Raised when AI scoring analysis is unavailable or invalid."""
+
+
+class BlockchainAdapterError(ScoringAPIError):
+    """Raised when ProjectManager smart contract reads fail."""

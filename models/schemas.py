@@ -25,9 +25,7 @@ class ErrorResponse(BaseModel):
 
 
 class ScoreRequest(BaseModel):
-    cell_id: str = Field(..., min_length=3, max_length=128, pattern=r"^[a-zA-Z0-9._:-]+$")
-    previous_score: int | None = Field(default=None, ge=0, le=100)
-    measurement_date: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    project_id: str = Field(..., pattern=r"^0x[a-fA-F0-9]{40}$")
 
 
 class ProjectGeometry(BaseModel):
@@ -58,6 +56,11 @@ class FraudAnalysis(BaseModel):
     description: str = Field(..., min_length=1)
 
 
+class FraudAnalysis(BaseModel):
+    criticality: CriticalityLevel
+    description: str = Field(..., min_length=1)
+
+
 class FraudAnalysisRequest(BaseModel):
     cell_id: str
     score: int = Field(..., ge=0, le=100)
@@ -69,19 +72,40 @@ class FraudAnalysisRequest(BaseModel):
     flags: list[str] = Field(default_factory=list)
 
 
+class ProjectScoringRecord(BaseModel):
+    measurement_date: int = Field(..., ge=1)
+    scoring: int = Field(..., ge=0, le=100)
+    fraud_scoring: int = Field(..., ge=0, le=100)
+    stored_at: int = Field(..., ge=0)
+
+
+class ProjectScoringAnalysisRequest(BaseModel):
+    project_id: str = Field(..., pattern=r"^0x[a-fA-F0-9]{40}$")
+    cell_id: str
+    measurement_date: int = Field(..., ge=1)
+    indicators: Indicators
+    cloud_coverage: float = Field(..., ge=0.0, le=1.0)
+    flags: list[str] = Field(default_factory=list)
+    previous_scoring_history: list[ProjectScoringRecord] = Field(default_factory=list)
+
+
+class AIScoringResponse(BaseModel):
+    scoring: str = Field(..., pattern=r"^(0\.\d{2}|1\.00)$")
+    fraud_scoring: str = Field(..., pattern=r"^(0\.\d{2}|1\.00)$")
+
+
 class ScoreResponse(BaseModel):
-    score: int = Field(..., ge=0, le=100)
-    criticality: CriticalityLevel
-    description: str
-    measurement_date: str | None = None
+    project_id: str
+    cell_id: str
+    scoring: str = Field(..., pattern=r"^(0\.\d{2}|1\.00)$")
+    fraud_scoring: str = Field(..., pattern=r"^(0\.\d{2}|1\.00)$")
+    measurement_date: int
 
 
 class ChainlinkScoreResponse(BaseModel):
+    project_id: str
     cell_id: str
-    score: int = Field(..., ge=0, le=100)
-    criticality: CriticalityLevel
-    criticality_code: int = Field(..., ge=0, le=2, description="0=low, 1=medium, 2=high")
-    decision: str = Field(..., description="approve, review, or reject")
-    flags: list[str] = Field(default_factory=list)
-    measurement_date: str | None = None
-    schema_version: str = "chainlink-score-v1"
+    scoring: int = Field(..., ge=0, le=100)
+    fraud_scoring: int = Field(..., ge=0, le=100)
+    measurement_date: int
+    schema_version: str = "chainlink-project-scoring-v1"

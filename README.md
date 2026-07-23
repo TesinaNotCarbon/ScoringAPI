@@ -1,11 +1,11 @@
 # Scoring API
 
-FastAPI service for environmental/reforestation scoring. It receives a `cell_id`, resolves project geometry from IPFS/Pinata, reads satellite observations through a provider interface, computes NDVI/SAVI/EVI/NBR, and returns a deterministic score suitable for Chainlink Functions or CRE.
+FastAPI service for environmental/reforestation scoring. It receives a project smart-contract address, reads its `cell_id` and previous scoring history from `ProjectManager`, resolves project geometry from IPFS/Pinata, reads satellite observations, and asks the LLM to return `scoring` and `fraud_scoring` values from `0.00` to `1.00`.
 
 ## Structure
 
 ```text
-adapters/   IPFS, satellite, and Groq provider clients
+adapters/   Blockchain, IPFS, satellite, and Groq provider clients
 api/        HTTP routes
 core/       config, app factory, logging, exceptions
 models/     Pydantic schemas
@@ -51,18 +51,22 @@ Key variables:
 - `PINATA_GATEWAY_BASE_URL`: Pinata/IPFS gateway base URL.
 - `PINATA_JWT`: Pinata JWT. If omitted in `local`/`test`, a deterministic mock IPFS service is used.
 - `SATELLITE_PROVIDER`: `mock` or `http`.
-- `GROQ_API_KEY`: Groq API key used by the LLM fraud-analysis adapter.
+- `BLOCKCHAIN_ADAPTER`: `mock` or `web3`.
+- `RPC_URL`: EVM RPC URL when `BLOCKCHAIN_ADAPTER=web3`.
+- `PROJECT_MANAGER_ADDRESS`: deployed ProjectManager contract address.
+- `PROJECT_MANAGER_ABI_PATH`: path to the ProjectManager ABI JSON file.
+- `GROQ_API_KEY`: Groq API key used by the LLM scoring adapter.
 - `GROQ_MODEL`: Groq chat model, defaults to `llama-3.1-8b-instant`.
-- `APPROVE_THRESHOLD`, `REVIEW_THRESHOLD`: scoring thresholds.
-- `DRASTIC_IMPROVEMENT_THRESHOLD`: max score increase before flagging suspicious improvement.
+- `APPROVE_THRESHOLD`, `REVIEW_THRESHOLD`: legacy thresholds retained for compatibility.
+- `DRASTIC_IMPROVEMENT_THRESHOLD`: legacy threshold retained for compatibility.
 - `CORS_ORIGINS`: comma-separated allowed origins.
 
 ## Endpoints
 
 - `GET /` health check.
-- `GET /score/{cell_id}` full scoring response. Optionally pass `?previous_score=70&measurement_date=2026-07-15`.
-- `POST /score` full scoring response with `{ "cell_id": "...", "previous_score": 70, "measurement_date": "2026-07-15" }`.
-- `GET /chainlink/score/{cell_id}` deterministic Chainlink DON consensus response without free-text `description`. Optionally pass `?previous_score=70&measurement_date=2026-07-15`.
+- `GET /score/{project_id}` full scoring response. `project_id` must be an EVM address.
+- `POST /score` full scoring response with `{ "project_id": "0x..." }`.
+- `GET /chainlink/score/{project_id}` Chainlink-compatible response with `scoring` and `fraud_scoring` scaled to `0..100` integers.
 
 ## Tests
 

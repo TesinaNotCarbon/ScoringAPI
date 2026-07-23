@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 import core.app
-from models.schemas import FraudAnalysis, FraudAnalysisRequest
+from models.schemas import AIScoringResponse, ProjectScoringAnalysisRequest
 
 
 class TestAIProvider:
@@ -13,18 +13,9 @@ class TestAIProvider:
     async def shutdown(self) -> None:
         return None
 
-    async def analyze_fraud(self, request: FraudAnalysisRequest) -> FraudAnalysis:
-        flags = set(request.flags)
-        if "possible_burn_or_logging" in flags or request.score < 45:
-            criticality = "high"
-        elif flags or request.score_trend in {"regressed", "suspicious_improvement"}:
-            criticality = "medium"
-        else:
-            criticality = "low"
-        return FraudAnalysis(
-            criticality=criticality,
-            description=f"test analysis; trend={request.score_trend}; flags={','.join(request.flags)}",
-        )
+    async def analyze_project_scoring(self, request: ProjectScoringAnalysisRequest) -> AIScoringResponse:
+        fraud = "0.50" if request.flags else "0.10"
+        return AIScoringResponse(scoring="0.80", fraud_scoring=fraud)
 
 
 @pytest.fixture(autouse=True)
