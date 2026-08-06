@@ -1,8 +1,11 @@
+import json
+
 import pytest
 
 from core.config import Settings
 from services.indicators import calculate_indicators
 from adapters.ipfs.mocks import MockIPFSService
+from adapters.ipfs.mocks import service as mock_ipfs_service_module
 from adapters.satellite import MockSatelliteImageryProvider
 
 
@@ -59,3 +62,18 @@ async def test_unknown_cell_id_maps_to_deterministic_geojson() -> None:
     second = await service.download_geojson("unknown-cell-123")
 
     assert first.geojson == second.geojson
+
+
+@pytest.mark.asyncio
+async def test_mock_ipfs_invalid_mock_file_and_empty_fallback(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    invalid = tmp_path / "invalid.json"
+    invalid.write_text(json.dumps([]), encoding="utf-8")
+    monkeypatch.setattr(mock_ipfs_service_module, "_MOCK_GEOJSONS_PATH", invalid)
+
+    service = MockIPFSService(Settings(environment="test"))
+    with pytest.raises(ValueError, match="must contain an object"):
+        await service.startup()
+
+    service._geojsons = {}
+    with pytest.raises(ValueError, match="No mock GeoJSON"):
+        service._fallback_geojson("valid-cell")

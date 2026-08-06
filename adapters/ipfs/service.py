@@ -63,7 +63,7 @@ class IPFSService:
                         f"Failed to fetch CID {cell_id}. Status {response.status}. Body: {text[:300]}"
                     )
 
-        raise IPFSDownloadError(f"Exceeded retries for CID {cell_id}")
+        raise IPFSDownloadError(f"Exceeded retries for CID {cell_id}")  # pragma: no cover - defensive guard
 
     async def _read_bounded_json(self, response: aiohttp.ClientResponse, cell_id: str) -> dict[str, Any]:
         content_type = response.headers.get("Content-Type", "")
